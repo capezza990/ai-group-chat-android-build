@@ -30,11 +30,10 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
-
       - name: Install Android SDK 36
         run: |
+          export ANDROID_HOME=/usr/local/lib/android/sdk
+          export ANDROID_SDK_ROOT=/usr/local/lib/android/sdk
           yes | sdkmanager --licenses >/dev/null || true
           sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0"
 
@@ -49,17 +48,12 @@ jobs:
 
       - name: Build debug APK
         working-directory: build-source/AI_GROUP_CHAT_ANDROID_M1_GITHUB
+        env:
+          ANDROID_HOME: /usr/local/lib/android/sdk
+          ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
         run: gradle --no-daemon :app:assembleDebug
 
       - name: Prepare APK artifact
         run: |
           cp build-source/AI_GROUP_CHAT_ANDROID_M1_GITHUB/app/build/outputs/apk/debug/app-debug.apk AI_GROUP_CHAT_ANDROID_M1-debug.apk
-          test -f AI_GROUP_CHAT_ANDROID_M1-debug.apk
-
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: AI_GROUP_CHAT_ANDROID_M1-debug-apk
-          path: AI_GROUP_CHAT_ANDROID_M1-debug.apk
-          if-no-files-found: error
-          retention-days: 30
+         
