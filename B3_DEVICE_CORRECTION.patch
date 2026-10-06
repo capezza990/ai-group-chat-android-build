@@ -39,6 +39,15 @@
      n = n.replace(/^download( file)?:?\s*/i, '');
      if (!n && kind === 'link') { try { var p = new URL(el.href).pathname.split('/'); n = decodeURIComponent(p[p.length - 1] || ''); } catch (e) {} }
      return n.slice(0, 300);
+@@ -597,7 +607,7 @@
+   start();
+ 
+   window.__agc = {
+-    version: 6,
++    version: 7,
+     spec: spec(),
+     health: health,
+     poll: poll,
 --- a/app/src/main/java/com/aigroupchat/bridge/engine/ProviderSpec.java
 +++ b/app/src/main/java/com/aigroupchat/bridge/engine/ProviderSpec.java
 @@ -40,7 +40,7 @@
