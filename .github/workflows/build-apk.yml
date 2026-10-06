@@ -24,7 +24,7 @@ jobs:
         run: |
           rm -rf build-source
           mkdir build-source
-          unzip -q AI_GROUP_CHAT_B2_2A_SOURCE.zip -d build-source
+          unzip -q AI_GROUP_CHAT_B3_FINAL_SOURCE.zip -d build-source
           test -f build-source/AI_GROUP_CHAT_ANDROID_M1_GITHUB/settings.gradle
 
       - name: Set up Java 17
@@ -72,3 +72,4 @@ jobs:
           path: AI_GROUP_CHAT_ANDROID_M1-debug.apk
           if-no-files-found: error
           retention-days: 30
+
