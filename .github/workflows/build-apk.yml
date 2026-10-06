@@ -27,6 +27,10 @@ jobs:
           unzip -q AI_GROUP_CHAT_B3_FINAL_SOURCE.zip -d build-source
           test -f build-source/AI_GROUP_CHAT_ANDROID_M1_GITHUB/settings.gradle
 
+      - name: Apply B3.1 device correction
+        working-directory: build-source/AI_GROUP_CHAT_ANDROID_M1_GITHUB
+        run: patch -p1 --batch --forward < ../../B3_DEVICE_CORRECTION.patch
+
       - name: Set up Java 17
         uses: actions/setup-java@v4
         with:
@@ -55,6 +59,16 @@ jobs:
         working-directory: build-source/AI_GROUP_CHAT_ANDROID_M1_GITHUB
         run: python3 tools/validate_project.py
 
+      - name: Validate device correction
+        working-directory: build-source/AI_GROUP_CHAT_ANDROID_M1_GITHUB
+        run: |
+          python3 tools/roomtest/capture_source_check.py
+          python3 tools/roomtest/capture_source_check.py --selftest
+          python3 tools/roomtest/file_ui_source_check.py
+          python3 tools/roomtest/upload_source_check.py
+          python3 tools/roomtest/wiring_source_check.py
+          python3 tools/roomtest/ui_source_check.py
+
       - name: Build APK
         working-directory: build-source/AI_GROUP_CHAT_ANDROID_M1_GITHUB
         run: gradle --no-daemon :app:assembleDebug
@@ -72,4 +86,3 @@ jobs:
           path: AI_GROUP_CHAT_ANDROID_M1-debug.apk
           if-no-files-found: error
           retention-days: 30
-

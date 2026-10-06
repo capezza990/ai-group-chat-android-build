@@ -1,0 +1,191 @@
+--- a/app/build.gradle
++++ b/app/build.gradle
+@@ -10,8 +10,8 @@
+         applicationId 'com.aigroupchat.bridge'
+         minSdk 26
+         targetSdk 36
+-        versionCode 29
+-        versionName '0.15.0-b3'
++        versionCode 30
++        versionName '0.15.0-b3.1'
+     }
+ 
+     signingConfigs {
+--- a/app/src/main/assets/agc_engine.js
++++ b/app/src/main/assets/agc_engine.js
+@@ -1,7 +1,7 @@
+ /* AI Group Chat engine lab (P1-A). Installed into provider pages; idempotent.
+  * Read-only except explicit send/type-check/attachment operations. Health/poll/probe/attachmentState never mutate the page. */
+ (function () {
+-  if (window.__agc && window.__agc.version === 6) { window.__agc.spec = window.__AGC_SPEC || window.__agc.spec; return; }
++  if (window.__agc && window.__agc.version === 7) { window.__agc.spec = window.__AGC_SPEC || window.__agc.spec; return; }
+   var st = {
+     pushes: 0, lastPush: 0, sendResult: 'none', before: { a: 0, u: 0 },
+     baseA: null, baseU: null, beforeNodesA: null,
+@@ -437,6 +437,16 @@
+     var n = '';
+     if (kind === 'link') n = el.getAttribute('download') || '';
+     if (!n) n = norm(el.getAttribute('aria-label') || el.getAttribute('title') || el.innerText || el.textContent || '');
++    // ChatGPT's real download icon is intentionally generic ("Download file"). Resolve its name only inside the configured file-card root, and only
++    // when exactly one configured name element exists there. If the relationship is not unique, this is not an offer and nothing is clicked.
++    if (kind === 'button' && /^download file$/i.test(n)) {
++      var roots = spec().offerRoot || [], root = null;
++      for (var r = 0; r < roots.length && !root; r++) { try { root = el.closest(roots[r]); } catch (e) {} }
++      var names = root ? qaIn(root, spec().offerName) : [];
++      if (names.length !== 1) return '';
++      n = norm(names[0].innerText || names[0].textContent || '');
++      return n.slice(0, 300);
++    }
+     n = n.replace(/^download( file)?:?\s*/i, '');
+     if (!n && kind === 'link') { try { var p = new URL(el.href).pathname.split('/'); n = decodeURIComponent(p[p.length - 1] || ''); } catch (e) {} }
+     return n.slice(0, 300);
+--- a/app/src/main/java/com/aigroupchat/bridge/engine/ProviderSpec.java
++++ b/app/src/main/java/com/aigroupchat/bridge/engine/ProviderSpec.java
+@@ -40,7 +40,7 @@
+                     "appleid.apple.com", "login.microsoftonline.com", "login.live.com"},
+             new String[]{"oaiusercontent.com", "chatgpt.com"},
+             "^https://chatgpt\\.com/(?:g/[^/]+/)?c/([0-9a-fA-F-]{36})",
+-            selectors(
++            fileMeta(selectors(
+                     new String[]{"#prompt-textarea"},
+                     new String[]{"button[data-testid='send-button']"},
+                     new String[]{"button[data-testid='stop-button']"},
+@@ -52,9 +52,10 @@
+                     new String[]{"button[aria-label^='Remove file']", "button[aria-label^='Remove attachment']"},
+                     new String[]{"[data-testid='composer-attachment'][data-state='uploading']", "[aria-label='Uploading file']"},
+                     new String[]{"input[type='file']"},
+-                    // GUESSES (cannot be verified off-device; the Engine Lab "Probe files" shows what is really on the page). Nothing matching = the reply is plain text.
+                     new String[]{"a[href^='sandbox:']", "a[href*='/backend-api/files/']", "a[download]"},
+-                    new String[]{"button[aria-label^='Download']", "[data-testid='file-download-button']"}));
++                    // Real-phone B3 evidence: the named behavior button opens the Library viewer; this exact file-card control starts the download.
++                    new String[]{"button[aria-label='Download file']"}),
++                    new String[]{"[role='group']"}, new String[]{".truncate"}));
+ 
+     public static final ProviderSpec CLAUDE = new ProviderSpec(
+             "claude", "Claude", "https://claude.ai/",
+@@ -62,7 +63,7 @@
+             new String[]{"claude.ai", "anthropic.com", "accounts.google.com"},
+             new String[]{"claude.ai", "claudeusercontent.com", "anthropic.com"},
+             "^https://claude\\.ai/chat/([0-9a-fA-F-]{36})",
+-            selectors(
++            fileMeta(selectors(
+                     new String[]{"div.ProseMirror[contenteditable='true']"},
+                     new String[]{"button[aria-label='Send message']"},
+                     new String[]{"button[aria-label='Stop response']"},
+@@ -74,9 +75,20 @@
+                     new String[]{"button[aria-label^='Remove attachment']", "button[aria-label^='Remove file']"},
+                     new String[]{"[data-testid='attachment'][data-state='uploading']", "[aria-label='Uploading']"},
+                     new String[]{"input[type='file']"},
+-                    // GUESSES (cannot be verified off-device; the Engine Lab "Probe files" shows what is really on the page). Nothing matching = the reply is plain text.
+                     new String[]{"a[download]", "a[href^='blob:']"},
+-                    new String[]{"button[aria-label='Download']", "button[aria-label^='Download file']", "[data-testid='file-download']"}));
++                    // Real-phone B3 evidence: Claude's file-card icon is labelled "Download <filename>".
++                    new String[]{"button[aria-label^='Download ']"}),
++                    new String[]{}, new String[]{}));
++
++    private static JSONObject fileMeta(JSONObject o, String[] offerRoot, String[] offerName) {
++        try {
++            o.put("offerRoot", new JSONArray(java.util.Arrays.asList(offerRoot)));
++            o.put("offerName", new JSONArray(java.util.Arrays.asList(offerName)));
++            return o;
++        } catch (Exception e) {
++            return new JSONObject();
++        }
++    }
+ 
+     private static JSONObject selectors(String[] composer, String[] send, String[] stop, String[] streaming,
+                                         String[] assistant, String[] user, String[] attachmentRoot,
+--- a/tools/pagetest/page_mutations.py
++++ b/tools/pagetest/page_mutations.py
+@@ -22,6 +22,7 @@
+  ('a capture never frees the previous one',          "    caps = {}; // one capture at a time: the previous one's memory is released\n", ""),
+  ('the probe reports full addresses',                "return (m ? m[1] + (m[2] || '') : '?') + (ext ? ' .' + ext[1].toLowerCase() : '');", "return h;"),
+  ('the message id is taken from a child element',    "var e = (n.getAttribute && n.getAttribute('data-message-id')) ? n : (n.closest ? n.closest('[data-message-id]') : null);", "var e = (n.getAttribute && n.getAttribute('data-message-id')) ? n : (n.querySelector ? n.querySelector('[data-message-id]') : null);"),
++ ('an ambiguous generic file-card name is accepted',      "if (names.length !== 1) return '';", "if (!names.length) return '';"),
+ ]
+ 
+ tmp = tempfile.mkdtemp(prefix='pagemut-')
+--- a/tools/pagetest/page_test.js
++++ b/tools/pagetest/page_test.js
+@@ -228,6 +228,36 @@
+     check(rep.href === 'https://x.test/f1' && rep.mime === 'application/pdf' && offers.find(o => o.name === 'data.csv').href === '', 'a link reports its address and type, a button has no address');
+     check(offers.find(o => o.name === 'notes.md').href === 'sandbox:/mnt/data/s.txt', 'a sandbox: address is reported as it is (the app will treat it as click-only)');
+ 
++    // Real-device correction: ChatGPT's named behavior button is only a preview opener. The actual downloader is the generic file-card icon.
++    {
++      const c = makePage();
++      c.w.__AGC_SPEC.offerLink = []; c.w.__AGC_SPEC.offerButton = ["button[aria-label='Download file']"];
++      c.w.__AGC_SPEC.offerRoot = ["[role='group']"]; c.w.__AGC_SPEC.offerName = ['.truncate'];
++      const a = c.w.document.createElement('div'); a.className = 'a'; a.setAttribute('data-message-id', 'chat-file');
++      a.innerHTML = '<button class=preview aria-label="Download B3_ENGINE_LAB_TEST.txt">preview</button>' +
++        '<div role=group><span class=truncate>B3_ENGINE_LAB_TEST.txt</span><span>Document</span><button class=real aria-label="Download file">icon</button></div>';
++      c.list.appendChild(a);
++      let preview = 0, real = 0; c.w.document.querySelector('.preview').onclick = () => preview++; c.w.document.querySelector('.real').onclick = () => real++;
++      const co = JSON.parse(c.w.__agc.fileOffers());
++      check(co.length === 1 && co[0].name === 'B3_ENGINE_LAB_TEST.txt' && co[0].msgId === 'chat-file', 'ChatGPT exposes the real file-card download control with the filename resolved inside that exact card');
++      check(JSON.parse(c.w.__agc.clickOffer(co[0])).ok === true && real === 1 && preview === 0, 'ChatGPT capture clicks the real download icon, never the preview-opening behavior button');
++      c.w.document.querySelector('[role=group]').insertAdjacentHTML('afterbegin', '<span class=truncate>decoy.txt</span>');
++      check(JSON.parse(c.w.__agc.fileOffers()).length === 0, 'an ambiguous ChatGPT file-card name fails closed instead of clicking a guessed file');
++    }
++
++    // Real-device correction: Claude labels the direct file-card icon "Download <filename>". It still exposes no provider-stable reply id, so first capture
++    // may use the accepted newest-reply fallback while manual retry remains fail-closed.
++    {
++      const c = makePage();
++      c.w.__AGC_SPEC.offerLink = []; c.w.__AGC_SPEC.offerButton = ["button[aria-label^='Download ']"];
++      const row = c.w.document.createElement('div');
++      row.innerHTML = '<div class=a><button class=real aria-label="Download Bound test">icon</button><button data-testid="file-card-open" aria-label="View Bound test">view</button></div>';
++      c.list.appendChild(row); let real = 0, view = 0; c.w.document.querySelector('.real').onclick = () => real++; c.w.document.querySelector('[data-testid=file-card-open]').onclick = () => view++;
++      const co = JSON.parse(c.w.__agc.fileOffers());
++      check(co.length === 1 && co[0].name === 'Bound test' && co[0].msgId === '', 'Claude exposes its direct file-card download control without inventing a stable reply id');
++      check(JSON.parse(c.w.__agc.clickOffer(co[0])).ok === true && real === 1 && view === 0, 'Claude capture clicks the direct download icon, never the file-card viewer');
++    }
++
+     // clicking is explicit and exact
+     let clicked = [];
+     q.w.document.querySelector('button.dl').addEventListener('click', () => clicked.push('data.csv'));
+@@ -275,7 +305,7 @@
+     q.w.__agc.captureUrl('empty', 'https://x.test/e', 1000); await sleep(10);
+     const es = JSON.parse(q.w.__agc.captureStatus('empty'));
+     check(es.state === 'ready' && es.size === 0 && es.chunks === 0 && q.w.__agc.captureChunk('empty', 0) === '', 'an empty file is ready with zero chunks');
+-    check(q.w.__agc.version === 6, 'the page script version was bumped so an older script is replaced');
++    check(q.w.__agc.version === 7, 'the page script version was bumped so an older script is replaced');
+ 
+     // the exact reply: every offer carries the page's own stable id of its assistant message ('' when the page has none)
+     {
+--- a/tools/roomtest/capture_source_check.py
++++ b/tools/roomtest/capture_source_check.py
+@@ -43,6 +43,9 @@
+     need('ChunkedReceiver.openAndDelete(file)' in T, 'the captured temp file is handed over through a stream that deletes it when closed')
+     need('public void onReplyWithFiles' in R and 'l.onReplyWithFiles(text, providerAsstMsgId, files)' in R and 'l.onReply(text, providerAsstMsgId)' in R, 'the room provider reports a reply with files, or plainly without')
+     need(P.count('downloadHosts') >= 3 and 'offerLink' in P and 'offerButton' in P, 'both provider profiles declare their download hosts and file-offer selectors')
++    need("button[aria-label='Download file']" in P and "button[aria-label^='Download']" not in P, 'ChatGPT targets the real file-card download icon, never the preview-opening named Download control')
++    need("button[aria-label^='Download ']" in P and "data-testid='file-card-open'" not in P, 'Claude targets the observed direct Download <filename> icon, never the file-card viewer')
++    need('offerRoot' in P and 'offerName' in P and "names.length !== 1" in js, 'a generic ChatGPT Download file icon gets a name only from one unambiguous configured file-card label')
+     need('Probe files' in L and 'Capture test' in L and 'withStableId' in L, 'the Engine Lab can probe file offers and test a capture')
+     return out
+ 
+@@ -63,12 +66,21 @@
+         ('the transport forgets the reply identity', 'WebCaptureTransport', lambda s: s.replace('store.sourceReplyRef(artifact.id)', '""', 1)),
+         ('the captured file is not deleted when closed', 'WebCaptureTransport', lambda s: s.replace('ChunkedReceiver.openAndDelete(file)', 'new java.io.FileInputStream(file)', 1)),
+         ('the room provider drops the files', 'WebRoomProvider', lambda s: s.replace('l.onReplyWithFiles(text, providerAsstMsgId, files)', 'l.onReply(text, providerAsstMsgId)', 1)),
++        ('ChatGPT falls back to the preview-opening named Download control', 'ProviderSpec', lambda s: s.replace("button[aria-label='Download file']", "button[aria-label^='Download']", 1)),
++        ('Claude stops targeting the observed Download <filename> control', 'ProviderSpec', lambda s: s.replace("button[aria-label^='Download ']", "button[aria-label='Download']", 1)),
++        ('a generic ChatGPT download icon accepts an ambiguous filename', 'agc_engine', lambda s: s.replace("if (names.length !== 1) return '';", "if (!names.length) return '';", 1)),
+     ]
+     problems = 0
+     for what, key, fn in breaks:
+-        g = dict(files); g[key] = fn(files[key])
+-        if g[key] == files[key]: print('FAIL  self-test anchor missing: ' + what); problems += 1; continue
+-        if all(ok for ok, _ in run(g, script)): print('FAIL  not noticed: ' + what); problems += 1
++        g = dict(files); js = script
++        if key == 'agc_engine':
++            changed = fn(script)
++            if changed == script: print('FAIL  self-test anchor missing: ' + what); problems += 1; continue
++            js = changed
++        else:
++            g[key] = fn(files[key])
++            if g[key] == files[key]: print('FAIL  self-test anchor missing: ' + what); problems += 1; continue
++        if all(ok for ok, _ in run(g, js)): print('FAIL  not noticed: ' + what); problems += 1
+     print(('PASS  ' if problems == 0 else 'FAIL  ') + 'capture source rules self-test (%d breakages, %d not noticed)' % (len(breaks), problems))
+     sys.exit(1 if problems else 0)
