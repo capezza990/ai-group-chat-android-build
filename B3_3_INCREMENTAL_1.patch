@@ -1,0 +1,265 @@
+diff --git a/app/build.gradle b/app/build.gradle
+index 3d1927f..bba9eae 100644
+--- a/app/build.gradle
++++ b/app/build.gradle
+@@ -10,8 +10,8 @@ android {
+         applicationId 'com.aigroupchat.bridge'
+         minSdk 26
+         targetSdk 36
+-        versionCode 31
+-        versionName '0.15.0-b3.2'
++        versionCode 32
++        versionName '0.15.0-b3.3'
+     }
+ 
+     signingConfigs {
+diff --git a/app/src/main/assets/agc_engine.js b/app/src/main/assets/agc_engine.js
+index 7d64df4..6421324 100644
+--- a/app/src/main/assets/agc_engine.js
++++ b/app/src/main/assets/agc_engine.js
+@@ -1,7 +1,7 @@
+ /* AI Group Chat engine lab (P1-A). Installed into provider pages; idempotent.
+  * Read-only except explicit send/type-check/attachment operations. Health/poll/probe/attachmentState never mutate the page. */
+ (function () {
+-  if (window.__agc && window.__agc.version === 8) { window.__agc.spec = window.__AGC_SPEC || window.__agc.spec; return; }
++  if (window.__agc && window.__agc.version === 9) { window.__agc.spec = window.__AGC_SPEC || window.__agc.spec; return; }
+   var st = {
+     pushes: 0, lastPush: 0, sendResult: 'none', before: { a: 0, u: 0 },
+     baseA: null, baseU: null, beforeNodesA: null,
+@@ -52,6 +52,22 @@
+     return [];
+   }
+ 
++  // Exactly one match INSIDE a known safe root. This is important for upload controls: provider pages may keep
++  // unrelated hidden file inputs elsewhere in the document. An ambiguous scoped match still fails closed.
++  function qUniqueIn(root, list, name) {
++    list = list || [];
++    delete st.ambiguous[name];
++    if (!root) return null;
++    for (var i = 0; i < list.length; i++) {
++      try {
++        var n = root.querySelectorAll(list[i]);
++        if (n.length === 1) { delete st.ambiguous[name]; return n[0]; }
++        if (n.length > 1) { st.ambiguous[name] = 'scoped ' + list[i] + ' x' + n.length; return null; }
++      } catch (e) {}
++    }
++    return null;
++  }
++
+   function norm(s) { return String(s || '').replace(/\s+/g, ' ').trim(); }
+ 
+   function composerText(el) {
+@@ -107,10 +123,17 @@
+     var a = inspectAttachments();
+     if (!a.safe) return 'refused:' + a.error;
+     if (a.count !== expectedBefore) return 'refused:attachment-count-changed';
+-    var input = qUnique(spec().fileInput, 'fileInput');
++    var comp = qUnique(spec().composer, 'composer');
++    if (!comp) return 'refused:no-unique-composer';
++    var root = attachmentRoot(comp);
++    if (!root) return 'refused:no-attachment-root';
++    // Prefer the input that belongs to THIS composer. ChatGPT currently keeps several global file inputs
++    // (#upload-files / photos / camera); only #upload-files is configured, and Claude is scoped to its form/fieldset.
++    var input = qUniqueIn(root, spec().fileInput, 'fileInput');
++    if (!input && !st.ambiguous.fileInput) input = qUnique(spec().fileInput, 'fileInput');
+     if (!input) return st.ambiguous.fileInput ? 'refused:file-input-ambiguous' : 'refused:no-unique-file-input';
+     if (input.disabled || input.getAttribute('aria-disabled') === 'true') return 'refused:file-input-disabled';
+-    input.click();
++    try { input.click(); } catch (e) { return 'refused:file-input-click-failed'; }
+     return 'chooser-opened';
+   }
+ 
+@@ -305,11 +328,15 @@
+ 
+   function health() {
+     var b = brief(), comp = qUnique(spec().composer, 'composer');
++    qUnique(spec().send, 'send');
+     var amb = st.ambiguous;
++    // Health is about whether the provider page itself is usable. A failed OPTIONAL operation (for example a
++    // file-input probe) must never poison the provider dot forever. Only health-critical selector ambiguity counts.
++    var healthAmbiguous = !!amb.composer || !!amb.send;
+     return JSON.stringify({
+       url: location.origin + location.pathname,
+       vis: document.visibilityState, hidden: document.hidden,
+-      healthy: !!comp && Object.keys(amb).length === 0,
++      healthy: !!comp && !healthAmbiguous,
+       composer: !!comp, composerTag: comp ? comp.tagName : '', composerEmpty: comp ? composerEmpty(comp) : null,
+       sendPresent: !!qUnique(spec().send, 'send'), sendVerified: st.sendVerified,
+       stopPresent: !!q(spec().stop), ambiguous: amb,
+@@ -616,7 +643,7 @@
+   start();
+ 
+   window.__agc = {
+-    version: 8,
++    version: 9,
+     spec: spec(),
+     health: health,
+     poll: poll,
+diff --git a/app/src/main/java/com/aigroupchat/bridge/engine/ProviderSpec.java b/app/src/main/java/com/aigroupchat/bridge/engine/ProviderSpec.java
+index c4aba2b..6d9976d 100644
+--- a/app/src/main/java/com/aigroupchat/bridge/engine/ProviderSpec.java
++++ b/app/src/main/java/com/aigroupchat/bridge/engine/ProviderSpec.java
+@@ -51,7 +51,7 @@ public final class ProviderSpec {
+                     new String[]{"[data-testid='composer-attachment']", "[data-testid='file-thumbnail']"},
+                     new String[]{"button[aria-label^='Remove file']", "button[aria-label^='Remove attachment']"},
+                     new String[]{"[data-testid='composer-attachment'][data-state='uploading']", "[aria-label='Uploading file']"},
+-                    new String[]{"input[type='file']"},
++                    new String[]{"input#upload-files[type='file']"},
+                     new String[]{"a[href^='sandbox:']", "a[href*='/backend-api/files/']", "a[download]"},
+                     // Real-phone B3/B3.1 evidence: this named control identifies the exact file, but opens ChatGPT's file viewer first.
+                     new String[]{"button[aria-label^='Download ']"}),
+diff --git a/app/src/main/java/com/aigroupchat/bridge/room/ArtifactGate.java b/app/src/main/java/com/aigroupchat/bridge/room/ArtifactGate.java
+index 43d3a23..c66eac3 100644
+--- a/app/src/main/java/com/aigroupchat/bridge/room/ArtifactGate.java
++++ b/app/src/main/java/com/aigroupchat/bridge/room/ArtifactGate.java
+@@ -23,9 +23,25 @@ public final class ArtifactGate {
+         return a.sourceBindingId != null && activeBindingId != null && providerId.equals(a.origin) && a.sourceBindingId.equals(activeBindingId);
+     }
+ 
+-    /** afterSeq/uptoSeq: the messages this turn's prompt includes (afterSeq, uptoSeq]. May create PENDING transfer rows, but only when files are actually involved. */
++    /** afterSeq/uptoSeq: legacy/eager evaluation used by focused unit tests and compatibility callers. */
+     public GateDecision evaluate(String roomId, String providerId, long afterSeq, long uptoSeq, long now) {
+-        List<AttachedArtifact> attached = store.attachmentsBetween(roomId, afterSeq, uptoSeq);
++        return evaluateNeeded(roomId, providerId, store.attachmentsBetween(roomId, afterSeq, uptoSeq), now);
++    }
++
++    /**
++     * Normal room behavior. Files created/attached during THIS user run are required for the intended AI turns. Older room files are lazy:
++     * they are transferred only when the root user request clearly refers to one, while their names/provenance may still appear as room history.
++     */
++    public GateDecision evaluate(String roomId, String providerId, long currentTurnStartSeq, long uptoSeq, String rootUserRequest, long now) {
++        List<AttachedArtifact> current = store.attachmentsBetween(roomId, Math.max(0L, currentTurnStartSeq - 1L), uptoSeq);
++        List<AttachedArtifact> historical = currentTurnStartSeq > 1L
++                ? store.attachmentsBetween(roomId, 0L, currentTurnStartSeq - 1L) : new ArrayList<>();
++        java.util.Set<String> selectedOld = ArtifactReferenceResolver.select(rootUserRequest, historical);
++        if (!selectedOld.isEmpty()) current.addAll(0, ArtifactReferenceResolver.filter(historical, selectedOld));
++        return evaluateNeeded(roomId, providerId, current, now);
++    }
++
++    private GateDecision evaluateNeeded(String roomId, String providerId, List<AttachedArtifact> attached, long now) {
+         if (attached.isEmpty()) return GateDecision.open();
+         final String activeBinding = store.activeBindingId(roomId, providerId);
+         Map<String, Artifact> needed = new LinkedHashMap<>(); // one entry per file even if several messages carry it, in message order
+diff --git a/app/src/main/java/com/aigroupchat/bridge/room/ArtifactReferenceResolver.java b/app/src/main/java/com/aigroupchat/bridge/room/ArtifactReferenceResolver.java
+new file mode 100644
+index 0000000..d20ea00
+--- /dev/null
++++ b/app/src/main/java/com/aigroupchat/bridge/room/ArtifactReferenceResolver.java
+@@ -0,0 +1,53 @@
++package com.aigroupchat.bridge.room;
++
++import java.util.ArrayList;
++import java.util.LinkedHashSet;
++import java.util.List;
++import java.util.Locale;
++import java.util.Set;
++import java.util.regex.Pattern;
++
++/**
++ * Conservative resolver for OLD room files. Historical bytes are lazy: merely being in canonical history does not upload
++ * them into every AI thread. We only choose an old artifact when the current user request clearly refers to a file.
++ * Current-turn attachments are handled separately by ArtifactGate and never need this resolver.
++ */
++public final class ArtifactReferenceResolver {
++    private static final Pattern GENERIC_REFERENCE = Pattern.compile(
++            "(?i)\\b(?:that|the|this|those|these|previous|earlier|last|old|same|attached|uploaded|sent|shared)\\s+"
++          + "(?:image|images|photo|photos|picture|pictures|screenshot|screenshots|file|files|attachment|attachments|document|documents|pdf|pdfs|spreadsheet|spreadsheets|zip|zips)\\b"
++          + "|\\b(?:image|photo|picture|screenshot|file|attachment|document|pdf|spreadsheet|zip)\\s+(?:i|we)\\s+(?:sent|shared|uploaded|attached)\\b");
++
++    private ArtifactReferenceResolver() { }
++
++    /** Returns artifact ids in canonical order. Exact filename mention wins; otherwise a clear generic reference selects the newest historical attachment message. */
++    public static Set<String> select(String requestText, List<AttachedArtifact> historical) {
++        LinkedHashSet<String> out = new LinkedHashSet<>();
++        if (historical == null || historical.isEmpty()) return out;
++        String q = requestText == null ? "" : requestText.toLowerCase(Locale.US);
++
++        // Exact names are unambiguous. Prefer only the newest message containing that name so a repeated filename does not resurrect every old copy.
++        long newestExactSeq = -1L;
++        for (int i = historical.size() - 1; i >= 0; i--) {
++            AttachedArtifact aa = historical.get(i);
++            String name = aa.artifact.displayName == null ? "" : aa.artifact.displayName.trim().toLowerCase(Locale.US);
++            if (name.length() < 2 || !q.contains(name)) continue;
++            if (newestExactSeq < 0) newestExactSeq = aa.messageSeq;
++            if (aa.messageSeq == newestExactSeq) out.add(aa.artifact.id);
++        }
++        if (!out.isEmpty()) return out;
++
++        if (!GENERIC_REFERENCE.matcher(requestText == null ? "" : requestText).find()) return out;
++        long newestSeq = historical.get(historical.size() - 1).messageSeq;
++        for (AttachedArtifact aa : historical) if (aa.messageSeq == newestSeq) out.add(aa.artifact.id);
++        return out;
++    }
++
++    /** Test helper / prompt helper: filters a canonical attachment list to selected ids without changing order. */
++    static List<AttachedArtifact> filter(List<AttachedArtifact> in, Set<String> ids) {
++        List<AttachedArtifact> out = new ArrayList<>();
++        if (in == null || ids == null || ids.isEmpty()) return out;
++        for (AttachedArtifact a : in) if (ids.contains(a.artifact.id)) out.add(a);
++        return out;
++    }
++}
+diff --git a/app/src/main/java/com/aigroupchat/bridge/room/ArtifactService.java b/app/src/main/java/com/aigroupchat/bridge/room/ArtifactService.java
+index 19c0ebc..2fddda4 100644
+--- a/app/src/main/java/com/aigroupchat/bridge/room/ArtifactService.java
++++ b/app/src/main/java/com/aigroupchat/bridge/room/ArtifactService.java
+@@ -74,6 +74,11 @@ public final class ArtifactService {
+         return gate.evaluate(roomId, providerId, afterSeq, uptoSeq, clock.getAsLong());
+     }
+ 
++    /** Normal room gate: current-run files are eager for intended recipients; older files are selected lazily from the root user request. */
++    public GateDecision evaluateForRun(String roomId, String providerId, long currentTurnStartSeq, long uptoSeq, String rootUserRequest) {
++        return gate.evaluate(roomId, providerId, currentTurnStartSeq, uptoSeq, rootUserRequest, clock.getAsLong());
++    }
++
+     public boolean isBusy() { synchronized (lock) { return busy; } }
+ 
+     /** Commits ONLY the exact transfer rows that this accepted send carried, and only ALL of them: every expected row must still be STAGED. If even one is not (it was reset by
+diff --git a/app/src/main/java/com/aigroupchat/bridge/room/CollaborationControl.java b/app/src/main/java/com/aigroupchat/bridge/room/CollaborationControl.java
+new file mode 100644
+index 0000000..fffa055
+--- /dev/null
++++ b/app/src/main/java/com/aigroupchat/bridge/room/CollaborationControl.java
+@@ -0,0 +1,42 @@
++package com.aigroupchat.bridge.room;
++
++import java.util.Locale;
++import java.util.regex.Matcher;
++import java.util.regex.Pattern;
++
++/** Hidden control line used only by natural multi-AI conversation. It never becomes canonical room text. */
++public final class CollaborationControl {
++    public enum Signal { CONTINUE, DONE, USER, MISSING }
++
++    private static final Pattern PATTERN = Pattern.compile(
++            "(?im)^[\\t \\u00A0]*\\[\\[(CONTINUE|NEXT:USER|DONE)\\]\\][\\t \\u00A0]*$" );
++
++    private CollaborationControl() {}
++
++    public static Signal signal(String text) {
++        Matcher m = PATTERN.matcher(text == null ? "" : text);
++        String token = null;
++        while (m.find()) token = m.group(1);
++        if (token == null) return Signal.MISSING;
++        switch (token.toUpperCase(Locale.US)) {
++            case "DONE": return Signal.DONE;
++            case "NEXT:USER": return Signal.USER;
++            case "CONTINUE": return Signal.CONTINUE;
++            default: return Signal.MISSING;
++        }
++    }
++
++    public static String clean(String text) {
++        return PATTERN.matcher(text == null ? "" : text)
++                .replaceAll("")
++                .replaceAll("\\n{3,}", "\\n\\n")
++                .trim();
++    }
++
++    public static String instruction() {
++        return "ROOM TURN CONTROL (required, hidden from the user): At the very end of your response, on its own line, "
++                + "write exactly one marker. Use [[CONTINUE]] only if another AI turn would materially help the shared task; "
++                + "use [[NEXT:USER]] if useful work now requires the user to answer, choose, approve, test, or provide something; "
++                + "use [[DONE]] when the shared task is complete or another AI turn would only repeat/agreement. Do not explain the marker.";
++    }
++}
