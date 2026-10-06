@@ -31,6 +31,10 @@ jobs:
         working-directory: build-source/AI_GROUP_CHAT_ANDROID_M1_GITHUB
         run: cat ../../B3_3_PATCH.b64.* | base64 -d | gzip -dc | patch -p1 --batch --forward
 
+      - name: Apply B3.3 post-validation correction
+        working-directory: build-source/AI_GROUP_CHAT_ANDROID_M1_GITHUB
+        run: patch -p1 --batch --forward < ../../B3_3_POST_VALIDATION_FIX.patch
+
       - name: Set up Java 17
         uses: actions/setup-java@v4
         with:

@@ -1,0 +1,121 @@
+--- a/app/src/main/java/com/aigroupchat/bridge/engine/ProviderSpec.java	2026-10-06 23:06:51.984965456 +0000
++++ b/app/src/main/java/com/aigroupchat/bridge/engine/ProviderSpec.java	2026-10-06 23:33:37.934372956 +0000
+@@ -79,7 +79,7 @@
+                     // Real-phone B3.1 evidence: Claude's direct file-card control is labelled "Download <filename>".
+                     new String[]{"button[aria-label^='Download ']"}),
+                     new String[]{}),
+-                    new String[]{"+", "Add content"}, new String[]{"Add files or photos"}));
++                    new String[]{"Add files, connectors, and more", "+", "Add content"}, new String[]{"Add files or photos"}));
+ 
+     private static JSONObject uploadFallback(JSONObject o, String[] triggerText, String[] itemText) {
+         try {
+--- a/tools/pagetest/page_test.js	2026-10-06 23:06:51.987078339 +0000
++++ b/tools/pagetest/page_test.js	2026-10-06 23:34:41.549475229 +0000
+@@ -184,14 +184,17 @@
+   check(p.w.__agc.startFileUpload(0) === 'refused:file-input-ambiguous', 'two scoped file inputs fail closed instead of guessing');
+   check(JSON.parse(p.w.__agc.health()).healthy === true, 'optional file-input ambiguity does not turn a healthy provider red');
+ 
+-  // Claude fallback is separate from ChatGPT: exact + in this composer, then exact documented menu row.
++  // Claude fallback is separate from ChatGPT: exact current composer-menu aria label, then exact documented menu row.
+   p = makePage(); let plusClicks = 0, menuClicks = 0;
+-  p.w.__AGC_SPEC.uploadMenuTriggerText = ['+']; p.w.__AGC_SPEC.uploadMenuItemText = ['Add files or photos'];
+-  const plus = p.w.document.createElement('button'); plus.type = 'button'; plus.textContent = '+';
++  p.w.__AGC_SPEC.uploadMenuTriggerText = ['Add files, connectors, and more']; p.w.__AGC_SPEC.uploadMenuItemText = ['Add files or photos'];
++  const plus = p.w.document.createElement('button'); plus.type = 'button'; plus.setAttribute('aria-label', 'Add files, connectors, and more'); plus.textContent = '+';
+   plus.addEventListener('click', () => { plusClicks++; const item = p.w.document.createElement('button'); item.type='button'; item.textContent='Add files or photos'; item.addEventListener('click', () => menuClicks++); p.w.document.body.appendChild(item); });
+   p.w.document.getElementById('composer-root').appendChild(plus);
+   check(p.w.__agc.openFileUploadFallback(0) === 'menu-opened' && plusClicks === 1, 'Claude fallback opens exactly one composer + control');
+   check(p.w.__agc.chooseFileUploadFallback() === 'chooser-requested' && menuClicks === 1, 'Claude fallback chooses exactly one Add files or photos row');
++  const duplicatePlus = p.w.document.createElement('button'); duplicatePlus.type = 'button'; duplicatePlus.setAttribute('aria-label', 'Add files, connectors, and more');
++  p.w.document.getElementById('composer-root').appendChild(duplicatePlus);
++  check(p.w.__agc.openFileUploadFallback(0) === 'refused:upload-menu-trigger-ambiguous' && plusClicks === 1, 'Claude fallback fails closed if the exact composer-menu control is ambiguous');
+ 
+   p = makePage();
+   p.w.__AGC_SPEC.attachmentBusy = ['.uploading'];
+--- a/tools/roomtest/ArtifactFlowTest.java	2026-10-06 02:26:54.000000000 +0000
++++ b/tools/roomtest/ArtifactFlowTest.java	2026-10-06 23:35:20.114724073 +0000
+@@ -240,9 +240,10 @@
+             check(made.origin.equals("claude") && made.sourceBindingId != null && made.sourceBindingId.equals(sentFrom) && !made.sourceBindingId.equals(w.store.activeBindingId("A", "claude")), "the file records the conversation the request was SENT to, not the one Claude is in when the answer arrives");
+             check(made.state == ArtifactState.READY && w.tr.calls.isEmpty(), "it was captured and nothing was uploaded for it yet");
+             w.cl.onSend = null;
+-            w.c.submitUserMessage("what is in the project?");
+-            check(w.tr.calls.equals(Arrays.asList(made.id + "->claude")) && w.store.currentTransfer(made.id, "A", "claude").state == V, "Claude is now in a conversation that never saw its own file: the file is uploaded there before Claude is asked");
+-            check(w.cl.prompts.size() == 2 && w.cl.prompts.get(1).contains("[Files shared earlier, now in this conversation] project.zip, 10 B"), "and Claude's prompt says so (its own reply is not repeated, so the file is named on its own line): " + w.cl.prompts.get(1));
++            w.c.submitUserMessage("what is in project.zip?");
++            check(w.tr.calls.equals(Arrays.asList(made.id + "->claude")) && w.store.currentTransfer(made.id, "A", "claude").state == V, "an explicit historical filename reference sends the file into Claude's NEW conversation before Claude is asked");
++            check(w.cl.prompts.size() == 2 && w.cl.prompts.get(1).contains("Historical room file supplied for this request: project.zip, 10 B") && w.cl.prompts.get(1).contains("from an earlier file created by Claude"), "Claude is told both that the historical bytes were supplied and where they came from: " + w.cl.prompts.get(1));
++            check(w.store.latestMessages("A", 20).stream().anyMatch(m -> RoomMessage.SYSTEM.equals(m.authorType) && m.text.contains("Claude received project.zip") && m.text.contains("From an earlier file from Claude")), "the later cross-turn handoff creates a separate provenance receipt");
+             // a third question: the file is already in the new conversation
+             w.c.submitUserMessage("thanks");
+             check(w.tr.calls.size() == 1, "afterwards nothing is uploaded again");
+@@ -259,8 +260,9 @@
+             check(w.tr.calls.isEmpty() && w.store.currentTransfer(made.id, "A", "claude") == null && w.cl.prompts.size() == 2 && !w.cl.prompts.get(1).contains("[Attached") && !w.cl.prompts.get(1).contains("Files shared"), "Claude already has its own file in that conversation: no upload, and the prompt does not mention the file in any form");
+             // ChatGPT joining the conversation later is a different matter
+             w.c.setRouting(RoutingMode.SINGLE, "chatgpt", 1);
+-            w.c.submitUserMessage("chatgpt, did you see the project?");
+-            check(w.tr.calls.equals(Arrays.asList(made.id + "->chatgpt")) && w.gpt.prompts.size() == 1 && w.gpt.prompts.get(0).contains("[Attached: project.zip, 10 B]"), "ChatGPT gets the file uploaded and told about it");
++            w.c.submitUserMessage("chatgpt, did you see project.zip?");
++            check(w.tr.calls.equals(Arrays.asList(made.id + "->chatgpt")) && w.gpt.prompts.size() == 1 && w.gpt.prompts.get(0).contains("Historical room file supplied for this request: project.zip, 10 B") && w.gpt.prompts.get(0).contains("from an earlier file created by Claude"), "an explicit later cross-turn request lazily gives ChatGPT Claude's older file with provenance");
++            check(w.store.latestMessages("A", 20).stream().anyMatch(m -> RoomMessage.SYSTEM.equals(m.authorType) && m.text.contains("ChatGPT received project.zip") && m.text.contains("From an earlier file from Claude")), "the old Claude message stays untouched; the later handoff has its own receipt");
+         });
+@@ -390,18 +392,23 @@
+             check(!w.c.isBusy() && w.summaries.size() == 1 && w.summaries.get(0).contains("could not be moved") && w.gpt.prompts.isEmpty(), "no transport: the run ends with a message instead of waiting forever: " + w.summaries);
+         });
+ 
+-        test("an AI that joins later catches up on files it has not seen", () -> {
++        test("an AI that joins later sees historical file metadata but receives bytes only on an explicit later request", () -> {
+             W w = new W(false);
+             Artifact a = w.addFile("hello");
+             w.c.submitUserMessage("read this", null, Arrays.asList(a.id));
+-            check(w.tr.calls.equals(Arrays.asList(a.id + "->chatgpt")) && w.cl.prompts.isEmpty(), "only ChatGPT was in the room");
++            check(w.tr.calls.equals(Arrays.asList(a.id + "->chatgpt")) && w.cl.prompts.isEmpty(), "only ChatGPT was in the room for the original attached turn");
+             w.c.addParticipant("claude", true); w.store.putBinding("A", new ProviderBinding("claude", "convA-cl", "l", "t", 2L));
+             w.c.submitUserMessage("what do you both think?");
+-            check(w.tr.calls.equals(Arrays.asList(a.id + "->chatgpt", a.id + "->claude")) && w.tr("claude").state == V, "Claude's context starts at the beginning, so the old file is sent to it before it answers (ChatGPT already has it)");
+-            check(w.cl.prompts.size() == 1 && w.anyPromptHas(w.cl, "[Attached: doc.txt, 5 B]") && !w.gpt.prompts.get(w.gpt.prompts.size() - 1).contains("[Attached"), "Claude's prompt mentions the old file; ChatGPT's latest prompt does not repeat it");
++            check(w.tr.calls.equals(Arrays.asList(a.id + "->chatgpt")) && w.store.currentTransfer(a.id, "A", "claude") == null, "joining later does NOT eagerly upload an old file to Claude");
++            check(w.cl.prompts.size() == 1 && w.anyPromptHas(w.cl, "File in room history; contents not supplied in this turn") && w.anyPromptHas(w.cl, "doc.txt, 5 B"), "Claude may know the canonical history contains the file without pretending to have its bytes");
++            w.c.setRouting(RoutingMode.SINGLE, "claude", 1);
++            w.c.submitUserMessage("Claude, what do you think about the file I sent ChatGPT?");
++            check(w.tr.calls.equals(Arrays.asList(a.id + "->chatgpt", a.id + "->claude")) && w.tr("claude").state == V, "the explicit cross-turn reference lazily sends the older file to Claude");
++            check(w.cl.prompts.size() == 2 && w.cl.prompts.get(1).contains("Historical room file supplied for this request: doc.txt, 5 B; from the user's earlier message to ChatGPT"), "Claude receives provenance for the historical file");
++            check(w.store.latestMessages("A", 30).stream().anyMatch(m -> RoomMessage.SYSTEM.equals(m.authorType) && m.text.contains("Claude received doc.txt") && m.text.contains("From your earlier message to ChatGPT")), "the lazy handoff creates a separate receipt instead of changing the original message");
+         });
+ 
+-        test("restart: interrupted work is FAILED and the next turn simply retries", () -> {
++        test("restart: interrupted work is FAILED, never blindly resent, and explicit historical reference can retry", () -> {
+             W w = new W(true); w.tr.mode = MockArtifactTransport.Mode.MANUAL;
+             Artifact a = w.addFile("hello");
+             w.c.submitUserMessage("read this", null, Arrays.asList(a.id));
+@@ -413,7 +420,10 @@
+             check(w.tr("chatgpt").state == F && w.tr("chatgpt").error.contains("interrupted") && w.store.transfersInState(S).isEmpty(), "after the restart the transfer is FAILED (interrupted), not 'sending' and not 'done'");
+             w.tr.mode = MockArtifactTransport.Mode.SUCCEED;
+             fresh.submitUserMessage("anyone there?", null, null);
+-            check(w.tr("chatgpt").state == V && w.tr("chatgpt").attempts == 2 && w.summaries.get(w.summaries.size() - 1).startsWith("fresh:"), "the next turn retries it (attempt 2) and goes on");
++            check(w.tr("chatgpt").state == F && w.tr("chatgpt").attempts == 1, "restart safety: an unrelated later turn does not blindly resend the interrupted historical file");
++            fresh.setRouting(RoutingMode.SINGLE, "chatgpt", 1);
++            fresh.submitUserMessage("please retry doc.txt", null, null);
++            check(w.tr("chatgpt").state == V && w.tr("chatgpt").attempts == 2 && w.summaries.get(w.summaries.size() - 1).startsWith("fresh:"), "an explicit later filename reference retries the interrupted transfer (attempt 2) and goes on");
+             // the worst moment: the app dies right after a captured file was moved into place and before its row became READY. One call at start-up must be enough.
+--- a/tools/roomtest/b33_consolidated_source_check.py	2026-10-06 23:06:51.987835371 +0000
++++ b/tools/roomtest/b33_consolidated_source_check.py	2026-10-06 23:33:37.934648802 +0000
+@@ -19,7 +19,7 @@
+  print(('PASS  ' if cond else 'FAIL  ')+msg)
+  if not cond: bad.append(msg)
+ ok("input#upload-files[type='file']" in PS and 'qUniqueIn(root, spec().fileInput' in E, 'ChatGPT upload is exact/scoped, never arbitrary input guessing')
+-ok('Add files or photos' in PS and 'tryConfiguredUploadMenu' in W, 'Claude has its own exact provider-menu chooser path')
++ok('Add files, connectors, and more' in PS and 'Add files or photos' in PS and 'tryConfiguredUploadMenu' in W, 'Claude has its own exact provider-menu chooser path')
+ ok('healthAmbiguous = !!amb.composer || !!amb.send' in E and 'fileInput' not in re.search(r'var healthAmbiguous[^;]*;',E).group(0), 'optional upload failure cannot poison provider health')
+ ok('Status { READY, WORKING, ATTENTION, PROBLEM, NEUTRAL, NOT_CONNECTED }' in S and 'DOT_ATTENTION' in A, 'green/amber/red/gray plus working status is wired')
+ card=A[A.index('private View messageAttachmentCard'):A.index('private void retryCapture')]
+--- a/tools/roomtest/upload_source_check.py	2026-10-06 23:06:51.988322607 +0000
++++ b/tools/roomtest/upload_source_check.py	2026-10-06 23:33:37.934606620 +0000
+@@ -27,7 +27,7 @@
+ JS = (ROOT/'app/src/main/assets/agc_engine.js').read_text()
+ ok("input#upload-files[type='file']" in P, 'ChatGPT upload targets the exact general-file input instead of ambiguous photo/camera inputs')
+ ok('qUniqueIn(root, spec().fileInput' in JS and 'healthAmbiguous = !!amb.composer || !!amb.send' in JS, 'file-input ambiguity fails upload closed but cannot poison provider health')
+-ok('openFileUploadFallback' in JS and 'chooseFileUploadFallback' in JS and 'Add files or photos' in P and 'scheduleChooserFallback' in surface, 'Claude has a separate exact + -> Add files or photos chooser fallback')
++ok('openFileUploadFallback' in JS and 'chooseFileUploadFallback' in JS and 'Add files, connectors, and more' in P and 'Add files or photos' in P and 'scheduleChooserFallback' in surface, 'Claude has a separate exact composer-menu -> Add files or photos chooser fallback')
+ ok('a.chooserDelivered || a.chooserFallbackStarted' in surface, 'the provider-menu fallback runs at most once and never after this operation got its chooser')
+ if bad: sys.exit(1)
+ print('Upload source check: %d checks, 0 failures' % 13)
