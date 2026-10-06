@@ -27,9 +27,9 @@ jobs:
           unzip -q AI_GROUP_CHAT_B3_FINAL_SOURCE.zip -d build-source
           test -f build-source/AI_GROUP_CHAT_ANDROID_M1_GITHUB/settings.gradle
 
-      - name: Apply B3.1 device correction
+      - name: Apply consolidated B3.3 correction
         working-directory: build-source/AI_GROUP_CHAT_ANDROID_M1_GITHUB
-        run: patch -p1 --batch --forward < ../../B3_DEVICE_CORRECTION.patch
+        run: cat ../../B3_3_PATCH.b64.* | base64 -d | gzip -dc | patch -p1 --batch --forward
 
       - name: Set up Java 17
         uses: actions/setup-java@v4
@@ -46,7 +46,6 @@ jobs:
           fi
           test -n "$SDKMANAGER"
           test -x "$SDKMANAGER"
-          echo "Using sdkmanager: $SDKMANAGER"
           yes | "$SDKMANAGER" --licenses >/dev/null || true
           "$SDKMANAGER" "platform-tools" "platforms;android-36" "build-tools;36.0.0"
 
@@ -55,19 +54,33 @@ jobs:
         with:
           gradle-version: '9.6.0'
 
-      - name: Validate project
-        working-directory: build-source/AI_GROUP_CHAT_ANDROID_M1_GITHUB
-        run: python3 tools/validate_project.py
-
-      - name: Validate device correction
+      - name: Validate project and B3.3 rules
         working-directory: build-source/AI_GROUP_CHAT_ANDROID_M1_GITHUB
         run: |
+          python3 tools/validate_project.py
+          python3 tools/roomtest/b33_consolidated_source_check.py
+          python3 tools/roomtest/upload_source_check.py
           python3 tools/roomtest/capture_source_check.py
           python3 tools/roomtest/capture_source_check.py --selftest
           python3 tools/roomtest/file_ui_source_check.py
-          python3 tools/roomtest/upload_source_check.py
+          python3 tools/roomtest/file_ui_source_check.py --selftest
           python3 tools/roomtest/wiring_source_check.py
+          python3 tools/roomtest/wiring_source_check.py --selftest
           python3 tools/roomtest/ui_source_check.py
+          python3 tools/roomtest/ui_source_check.py --selftest
+
+      - name: Run room and artifact tests
+        working-directory: build-source/AI_GROUP_CHAT_ANDROID_M1_GITHUB
+        env:
+          ANDROID_JAR: /usr/local/lib/android/sdk/platforms/android-36/android.jar
+        run: bash tools/roomtest/run_tests.sh
+
+      - name: Run provider page tests
+        working-directory: build-source/AI_GROUP_CHAT_ANDROID_M1_GITHUB/tools/pagetest
+        run: |
+          npm install --no-audit --no-fund
+          npm test
+          python3 page_mutations.py
 
       - name: Build APK
         working-directory: build-source/AI_GROUP_CHAT_ANDROID_M1_GITHUB
@@ -77,6 +90,7 @@ jobs:
         run: |
           cp build-source/AI_GROUP_CHAT_ANDROID_M1_GITHUB/app/build/outputs/apk/debug/app-debug.apk AI_GROUP_CHAT_ANDROID_M1-debug.apk
           test -s AI_GROUP_CHAT_ANDROID_M1-debug.apk
+          sha256sum AI_GROUP_CHAT_ANDROID_M1-debug.apk
           ls -lh AI_GROUP_CHAT_ANDROID_M1-debug.apk
 
       - name: Upload APK
