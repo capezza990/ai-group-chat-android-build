@@ -43,6 +43,10 @@ jobs:
         working-directory: build-source/AI_GROUP_CHAT_ANDROID_M1_GITHUB
         run: patch -p1 --batch --forward < ../../B3_4_1_FILEFIX.patch
 
+      - name: Apply B3.4.2 video-evidence correction
+        working-directory: build-source/AI_GROUP_CHAT_ANDROID_M1_GITHUB
+        run: patch -p1 --batch --forward < ../../B3_4_2_VIDEO_CORRECTION.patch
+
       - name: Set up Java 17
         uses: actions/setup-java@v4
         with:
