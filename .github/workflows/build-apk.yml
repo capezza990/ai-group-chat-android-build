@@ -59,6 +59,10 @@ jobs:
         working-directory: build-source/AI_GROUP_CHAT_ANDROID_M1_GITHUB
         run: patch -p1 --batch --forward < ../../B3_4_4_TESTFIX.patch
 
+      - name: Apply B3.4.4 Send Stop test correction
+        working-directory: build-source/AI_GROUP_CHAT_ANDROID_M1_GITHUB
+        run: patch -p1 --batch --forward < ../../B3_4_4_TESTFIX2.patch
+
       - name: Set up Java 17
         uses: actions/setup-java@v4
         with:
