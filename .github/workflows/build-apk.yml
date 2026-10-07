@@ -86,6 +86,20 @@ jobs:
           npm test
           python3 page_mutations.py
 
+      - name: Package patched source snapshot
+        run: |
+          cd build-source
+          zip -qr ../AI_GROUP_CHAT_PATCHED_SOURCE.zip AI_GROUP_CHAT_ANDROID_M1_GITHUB
+          test -s ../AI_GROUP_CHAT_PATCHED_SOURCE.zip
+
+      - name: Upload patched source snapshot
+        uses: actions/upload-artifact@v4
+        with:
+          name: AI_GROUP_CHAT_PATCHED_SOURCE
+          path: AI_GROUP_CHAT_PATCHED_SOURCE.zip
+          if-no-files-found: error
+          retention-days: 7
+
       - name: Build APK
         working-directory: build-source/AI_GROUP_CHAT_ANDROID_M1_GITHUB
         run: gradle --no-daemon :app:assembleDebug
