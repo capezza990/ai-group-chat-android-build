@@ -87,7 +87,9 @@
            + "|\\b(?:image|photo|picture|screenshot|file|attachment|document|pdf|spreadsheet|zip)\\s+(?:i|we)\\s+(?:sent|shared|uploaded|attached)\\b");
      private static final Pattern IMAGE_REFERENCE = Pattern.compile("(?i)\\b(?:image|images|photo|photos|picture|pictures|screenshot|screenshots)\\b");
 +    private static final Pattern DELIVERY_DIAGNOSTIC = Pattern.compile(
-+            "(?i)\\b(?:why|how come|what(?:'s| is)?\\s+the\\s+(?:error|problem)|did|does|do|has|have|was|were)\\b.{0,100}\\b(?:send|sent|upload|uploaded|deliver|delivered|receive|received|fail|failed|failure|error)\\b"
++            "(?i)\\b(?:why|how come)\\b.{0,100}\\b(?:send|sent|upload|uploaded|deliver|delivered|fail|failed|failure|error)\\b"
++          + "|\\b(?:did|has|have|was|were)\\b.{0,60}\\b(?:receive|received|sent|uploaded|delivered)\\b"
++          + "|\\bwhat(?:'s| is)?\\s+the\\s+(?:(?:upload|send|delivery|attachment)\\s+)?(?:error|problem|failure)\\b"
 +          + "|\\b(?:send|upload|delivery|attachment)\\s+(?:error|failure|failed)\\b"
 +          + "|\\b(?:failed|failure|error)\\b.{0,100}\\b(?:send|upload|deliver)\\b");
 +    private static final Pattern EXPLICIT_TRANSFER_REQUEST = Pattern.compile(
