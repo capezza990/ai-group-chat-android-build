@@ -82,7 +82,7 @@
  
 --- a/app/src/main/java/com/aigroupchat/bridge/room/ArtifactReferenceResolver.java
 +++ b/app/src/main/java/com/aigroupchat/bridge/room/ArtifactReferenceResolver.java
-@@ -14,6 +14,14 @@
+@@ -14,6 +14,16 @@
            + "(?:image|images|photo|photos|picture|pictures|screenshot|screenshots|file|files|attachment|attachments|document|documents|pdf|pdfs|spreadsheet|spreadsheets|zip|zips)\\b"
            + "|\\b(?:image|photo|picture|screenshot|file|attachment|document|pdf|spreadsheet|zip)\\s+(?:i|we)\\s+(?:sent|shared|uploaded|attached)\\b");
      private static final Pattern IMAGE_REFERENCE = Pattern.compile("(?i)\\b(?:image|images|photo|photos|picture|pictures|screenshot|screenshots)\\b");
@@ -99,17 +99,17 @@
  
      private ArtifactReferenceResolver() { }
  
-@@ -34,6 +42,10 @@
+@@ -33,6 +43,10 @@
+         if (historical == null || historical.isEmpty()) return out;
          String raw = requestText == null ? "" : requestText;
          String q = raw.toLowerCase(Locale.US);
- 
++
 +        // Mentioning a filename while asking about a failed/received upload is diagnostic metadata, not permission to
 +        // resend the bytes. An explicit resend/retry request overrides this guard.
 +        if (DELIVERY_DIAGNOSTIC.matcher(raw).find() && !EXPLICIT_TRANSFER_REQUEST.matcher(raw).find()) return out;
-+
+ 
          long newestExactSeq = -1L;
          for (int i = historical.size() - 1; i >= 0; i--) {
-             AttachedArtifact aa = historical.get(i);
 --- a/tools/roomtest/ArtifactFlowTest.java
 +++ b/tools/roomtest/ArtifactFlowTest.java
 @@ -421,6 +421,22 @@
