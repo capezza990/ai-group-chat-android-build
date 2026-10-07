@@ -1,0 +1,22 @@
+--- a/tools/roomtest/wiring_source_check.py	2026-10-07 10:50:02.241594723 +0000
++++ b/tools/roomtest/wiring_source_check.py	2026-10-07 10:50:02.798968246 +0000
+@@ -43,8 +43,8 @@
+     need(not re.search(r'(?m)^\s*private\s+(?:final\s+)?(?:Context|Activity|RoomActivity)\s', R) and 'getApplicationContext()' in R, 'the runtime never keeps a screen or an activity context')
+     need(0 < detach.find('service.cancelInFlight()') < detach.find('service.setListener(null)') < detach.find('upload.setTarget(null)'), 'detaching cancels the running job FIRST, then drops the listener, then unlinks the transports')
+     need('owner != whoever' in L and 'if (owner != null) detachLocked();' in L, 'only the attached owner can detach and a new owner replaces the old one safely')
+-    send_lines = [l for l in A.split('\n') if re.search(r'sendBtn\.(?:setText\(|setContentDescription\(|setBackground\(shape\()stopping', l)]
+-    need(len(send_lines) == 3 and all('anyBusy' in l and not re.search(r'(?<!any)busy \?', l) for l in send_lines) and 'final boolean anyBusy = busy || fileServiceBusy();' in A,
++    send_lines = [l for l in A.split('\n') if 'anyBusy' in l and re.search(r'sendBtn\.(?:setText\(|setContentDescription\(|setBackground\(shape\()', l)]
++    need(len(send_lines) == 3 and all(not re.search(r'(?<!any)busy \?', l) for l in send_lines) and 'final boolean anyBusy = busy || fileServiceBusy();' in A,
+          'the Send/Stop button\'s symbol, spoken description and colour all use ONE flag (run busy OR file service busy)')
+     return out
+ 
+@@ -79,7 +79,7 @@
+         ('detach unlinks before cancelling', 'lifecycle', lambda t: t.replace('        service.cancelInFlight();   // FIRST', '        upload.setTarget(null);\n        service.cancelInFlight();   // FIRST', 1)),
+         ('the Send button\'s description ignores a file job', 'activity', lambda t: t.replace('anyBusy ? "Stop" : "Send"', 'busy ? "Stop" : "Send"', 1)),
+         ('the Send button\'s colour ignores a file job', 'activity', lambda t: t.replace('anyBusy ? 0xFFB3475A : BLUE', 'busy ? 0xFFB3475A : BLUE', 1)),
+-        ('the Send button\'s symbol ignores a file job', 'activity', lambda t: t.replace('stopping ? "\\u2026" : anyBusy ? "\\u25A0" : "\\u27A4"', 'stopping ? "\\u2026" : busy ? "\\u25A0" : "\\u27A4"', 1)),
++        ('the Send button\'s symbol ignores a file job', 'activity', lambda t: t.replace('anyBusy ? \"\\u25A0\" : \"\\u27A4\"', 'busy ? \"\\u25A0\" : \"\\u27A4\"', 1)),
+         ('anyone can detach', 'lifecycle', lambda t: t.replace('if (whoever == null || owner != whoever) return false;', 'if (whoever == null) return false;', 1)),
+         ('a new owner does not replace the old one', 'lifecycle', lambda t: t.replace('        if (owner != null) detachLocked();   // a new screen replaces', '        // a new screen replaces', 1)),
+     ]
