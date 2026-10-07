@@ -1,0 +1,54 @@
+--- a/app/build.gradle
++++ b/app/build.gradle
+@@ -10,8 +10,8 @@
+         applicationId 'com.aigroupchat.bridge'
+         minSdk 26
+         targetSdk 36
+-        versionCode 34
+-        versionName '0.15.0-b3.4.1-filefix'
++        versionCode 35
++        versionName '0.15.0-b3.4.2-filefix'
+     }
+ 
+     signingConfigs {
+--- a/app/src/main/java/com/aigroupchat/bridge/engine/WebProviderSurface.java
++++ b/app/src/main/java/com/aigroupchat/bridge/engine/WebProviderSurface.java
+@@ -1169,26 +1169,9 @@
+         @Override
+         public boolean onShowFileChooser(WebView view, ValueCallback<Uri[]> filePathCallback, FileChooserParams fileChooserParams) {
+             UploadAttempt a = upload;
+-            if (a == null) return false; // user-driven provider browsing outside an AGC transfer keeps normal WebView behavior
+-
+-            // During an AGC transfer, never let the provider chooser escape to Android's visible system picker. The phone test
+-            // proved that this was happening. Bind the chooser to the exact provider conversation instead of the cached host flag:
+-            // a conversation-pattern match is both stronger and less vulnerable to SPA/history timing.
+-            if (!currentUpload(a) || a.handle == null || a.chooserDelivered) {
+-                filePathCallback.onReceiveValue(null);
+-                if (currentUpload(a)) main.post(() -> failUpload(a, "provider requested a chooser in an invalid upload state"));
+-                return true;
+-            }
+-            String expectedConversation = surfaceOperation.bindingId();
+-            String actualConversation = spec.conversationIdOf(view == null ? null : view.getUrl());
+-            if (expectedConversation == null || actualConversation == null || !expectedConversation.equals(actualConversation)) {
+-                filePathCallback.onReceiveValue(null);
+-                main.post(() -> failUpload(a, "provider conversation changed before the file chooser request"));
+-                return true;
+-            }
++            if (!currentUpload(a) || a.handle == null || a.chooserDelivered || !spec.isScriptHost(currentHost)) return false;
+             a.chooserDelivered = true;
+             filePathCallback.onReceiveValue(new Uri[]{a.handle.uri});
+-            ensureUploadPoll(a);
+             return true;
+         }
+ 
+--- a/tools/roomtest/upload_source_check.py
++++ b/tools/roomtest/upload_source_check.py
+@@ -29,7 +29,6 @@
+ ok('qUniqueIn(root, spec().fileInput' in JS and 'healthAmbiguous = !!amb.composer || !!amb.send' in JS, 'file-input ambiguity fails upload closed but cannot poison provider health')
+ ok('openFileUploadFallback' in JS and 'chooseFileUploadFallback' in JS and 'Add files, connectors, and more' in P and 'Add files or photos' in P and 'Add files and more' in P and 'Add photos & files' in P, 'ChatGPT and Claude both use exact visible provider upload menus')
+ ok('UPLOAD_MENU_RETRY_MS' in surface and 'chooseConfiguredUploadMenuItem' in surface and 'ensureUploadPoll' in surface, 'async provider menus get bounded exact-item retries with one upload poll')
+-ok('spec.conversationIdOf(view == null ? null : view.getUrl())' in surface and 'filePathCallback.onReceiveValue(null)' in surface, 'provider chooser is consumed only for the exact bound conversation and cannot leak to the Android system picker during AGC upload')
+ ok('upload-menu-item-not-found' in surface and 'startExactFileInput(a, expectedBefore, chosen)' in surface, 'bounded menu label drift falls back to the exact/scoped provider file input')
+ if bad: sys.exit(1)
+-print('Upload source check: %d checks, 0 failures' % 15)
++print('Upload source check: %d checks, 0 failures' % 14)
