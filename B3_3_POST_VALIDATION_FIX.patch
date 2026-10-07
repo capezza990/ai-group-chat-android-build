@@ -48,7 +48,7 @@
              // a third question: the file is already in the new conversation
              w.c.submitUserMessage("thanks");
              check(w.tr.calls.size() == 1, "afterwards nothing is uploaded again");
-@@ -259,8 +260,9 @@
+@@ -259,6 +260,7 @@
              check(w.tr.calls.isEmpty() && w.store.currentTransfer(made.id, "A", "claude") == null && w.cl.prompts.size() == 2 && !w.cl.prompts.get(1).contains("[Attached") && !w.cl.prompts.get(1).contains("Files shared"), "Claude already has its own file in that conversation: no upload, and the prompt does not mention the file in any form");
              // ChatGPT joining the conversation later is a different matter
              w.c.setRouting(RoutingMode.SINGLE, "chatgpt", 1);
@@ -87,7 +87,7 @@
              W w = new W(true); w.tr.mode = MockArtifactTransport.Mode.MANUAL;
              Artifact a = w.addFile("hello");
              w.c.submitUserMessage("read this", null, Arrays.asList(a.id));
-@@ -413,7 +420,10 @@
+@@ -413,5 +420,8 @@
              check(w.tr("chatgpt").state == F && w.tr("chatgpt").error.contains("interrupted") && w.store.transfersInState(S).isEmpty(), "after the restart the transfer is FAILED (interrupted), not 'sending' and not 'done'");
              w.tr.mode = MockArtifactTransport.Mode.SUCCEED;
              fresh.submitUserMessage("anyone there?", null, null);
