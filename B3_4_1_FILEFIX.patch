@@ -1,0 +1,146 @@
+--- a/app/build.gradle
++++ b/app/build.gradle
+@@ -10,8 +10,8 @@
+         applicationId 'com.aigroupchat.bridge'
+         minSdk 26
+         targetSdk 36
+-        versionCode 33
+-        versionName '0.15.0-b3.4-filefix'
++        versionCode 34
++        versionName '0.15.0-b3.4.1-filefix'
+     }
+ 
+     signingConfigs {
+--- a/app/src/main/java/com/aigroupchat/bridge/engine/ProviderSpec.java
++++ b/app/src/main/java/com/aigroupchat/bridge/engine/ProviderSpec.java
+@@ -56,7 +56,8 @@
+                     // Real-phone B3/B3.1 evidence: this named control identifies the exact file, but opens ChatGPT's file viewer first.
+                     new String[]{"button[aria-label^='Download ']"}),
+                     new String[]{"button[aria-label='Download']"}),
+-                    new String[]{"Add files and more"}, new String[]{"Add photos & files", "Add photos and files"}));
++                    new String[]{"Add files and more"}, new String[]{
++                            "Add photos & files", "Add photos and files", "Upload from device", "Upload files", "Upload file"}));
+ 
+     public static final ProviderSpec CLAUDE = new ProviderSpec(
+             "claude", "Claude", "https://claude.ai/",
+@@ -80,7 +81,8 @@
+                     // Real-phone B3.1 evidence: Claude's direct file-card control is labelled "Download <filename>".
+                     new String[]{"button[aria-label^='Download ']"}),
+                     new String[]{}),
+-                    new String[]{"Add files, connectors, and more", "+", "Add content"}, new String[]{"Add files or photos"}));
++                    new String[]{"Add files, connectors, and more", "+", "Add content"}, new String[]{
++                            "Add files or photos", "Upload files or photos", "Upload a file", "Upload files", "Add a file"}));
+ 
+     private static JSONObject uploadFallback(JSONObject o, String[] triggerText, String[] itemText) {
+         try {
+--- a/app/src/main/java/com/aigroupchat/bridge/engine/WebProviderSurface.java
++++ b/app/src/main/java/com/aigroupchat/bridge/engine/WebProviderSurface.java
+@@ -610,8 +610,14 @@
+                 ensureUploadPoll(a);
+                 return;
+             }
+-            if (chosen != null && chosen.contains("upload-menu-item-not-found") && System.currentTimeMillis() < discoverDeadline) {
+-                main.postDelayed(() -> chooseConfiguredUploadMenuItem(a, expectedBefore, discoverDeadline), UPLOAD_MENU_RETRY_MS);
++            if (chosen != null && chosen.contains("upload-menu-item-not-found")) {
++                if (System.currentTimeMillis() < discoverDeadline) {
++                    main.postDelayed(() -> chooseConfiguredUploadMenuItem(a, expectedBefore, discoverDeadline), UPLOAD_MENU_RETRY_MS);
++                    return;
++                }
++                // Mobile provider menus change labels more often than their underlying file input. After a bounded exact-menu
++                // search, fall back to the provider's exact/scoped file input instead of turning a harmless label drift into a hard failure.
++                startExactFileInput(a, expectedBefore, chosen);
+                 return;
+             }
+             if (chosen == null || chosen.contains("not-configured")) {
+@@ -1163,9 +1169,26 @@
+         @Override
+         public boolean onShowFileChooser(WebView view, ValueCallback<Uri[]> filePathCallback, FileChooserParams fileChooserParams) {
+             UploadAttempt a = upload;
+-            if (!currentUpload(a) || a.handle == null || a.chooserDelivered || !spec.isScriptHost(currentHost)) return false;
++            if (a == null) return false; // user-driven provider browsing outside an AGC transfer keeps normal WebView behavior
++
++            // During an AGC transfer, never let the provider chooser escape to Android's visible system picker. The phone test
++            // proved that this was happening. Bind the chooser to the exact provider conversation instead of the cached host flag:
++            // a conversation-pattern match is both stronger and less vulnerable to SPA/history timing.
++            if (!currentUpload(a) || a.handle == null || a.chooserDelivered) {
++                filePathCallback.onReceiveValue(null);
++                if (currentUpload(a)) main.post(() -> failUpload(a, "provider requested a chooser in an invalid upload state"));
++                return true;
++            }
++            String expectedConversation = surfaceOperation.bindingId();
++            String actualConversation = spec.conversationIdOf(view == null ? null : view.getUrl());
++            if (expectedConversation == null || actualConversation == null || !expectedConversation.equals(actualConversation)) {
++                filePathCallback.onReceiveValue(null);
++                main.post(() -> failUpload(a, "provider conversation changed before the file chooser request"));
++                return true;
++            }
+             a.chooserDelivered = true;
+             filePathCallback.onReceiveValue(new Uri[]{a.handle.uri});
++            ensureUploadPoll(a);
+             return true;
+         }
+ 
+--- a/app/src/main/java/com/aigroupchat/bridge/room/ArtifactReferenceResolver.java
++++ b/app/src/main/java/com/aigroupchat/bridge/room/ArtifactReferenceResolver.java
+@@ -14,6 +14,14 @@
+           + "(?:image|images|photo|photos|picture|pictures|screenshot|screenshots|file|files|attachment|attachments|document|documents|pdf|pdfs|spreadsheet|spreadsheets|zip|zips)\\b"
+           + "|\\b(?:image|photo|picture|screenshot|file|attachment|document|pdf|spreadsheet|zip)\\s+(?:i|we)\\s+(?:sent|shared|uploaded|attached)\\b");
+     private static final Pattern IMAGE_REFERENCE = Pattern.compile("(?i)\\b(?:image|images|photo|photos|picture|pictures|screenshot|screenshots)\\b");
++    private static final Pattern DELIVERY_DIAGNOSTIC = Pattern.compile(
++            "(?i)\\b(?:why|how come|what(?:'s| is)?\\s+the\\s+(?:error|problem)|did|does|do|has|have|was|were)\\b.{0,100}\\b(?:send|sent|upload|uploaded|deliver|delivered|receive|received|fail|failed|failure|error)\\b"
++          + "|\\b(?:send|upload|delivery|attachment)\\s+(?:error|failure|failed)\\b"
++          + "|\\b(?:failed|failure|error)\\b.{0,100}\\b(?:send|upload|deliver)\\b");
++    private static final Pattern EXPLICIT_TRANSFER_REQUEST = Pattern.compile(
++            "(?i)\\b(?:resend|re-send|retry|try\\s+sending|send\\s+again|upload\\s+again|attach\\s+again|share\\s+again)\\b"
++          + "|\\b(?:let|have)\\s+\\w+\\s+(?:see|inspect|read|open)\\b"
++          + "|\\bshow\\s+\\w+\\s+(?:the\\s+)?(?:file|image|photo|picture|document)\\b");
+ 
+     private ArtifactReferenceResolver() { }
+ 
+@@ -34,6 +42,10 @@
+         String raw = requestText == null ? "" : requestText;
+         String q = raw.toLowerCase(Locale.US);
+ 
++        // Mentioning a filename while asking about a failed/received upload is diagnostic metadata, not permission to
++        // resend the bytes. An explicit resend/retry request overrides this guard.
++        if (DELIVERY_DIAGNOSTIC.matcher(raw).find() && !EXPLICIT_TRANSFER_REQUEST.matcher(raw).find()) return out;
++
+         long newestExactSeq = -1L;
+         for (int i = historical.size() - 1; i >= 0; i--) {
+             AttachedArtifact aa = historical.get(i);
+--- a/tools/roomtest/ArtifactFlowTest.java
++++ b/tools/roomtest/ArtifactFlowTest.java
+@@ -421,6 +421,22 @@
+             check(w.store.currentTransfer(old.id, "A", "claude") == null, "no historical Claude transfer row was created for the older image");
+         });
+ 
++        test("diagnostic filename mention does not resend historical bytes, but explicit retry still can", () -> {
++            W w = new W(false);
++            Artifact a = w.addFile("hello");
++            w.c.submitUserMessage("read this", null, Arrays.asList(a.id));
++            check(w.tr.calls.equals(Arrays.asList(a.id + "->chatgpt")), "the original file went to ChatGPT once");
++            w.c.addParticipant("claude", true);
++            w.store.putBinding("A", new ProviderBinding("claude", "convA-cl", "l", "t", 2L));
++            w.c.setRouting(RoutingMode.SINGLE, "claude", 1);
++            w.c.submitUserMessage("Why did doc.txt fail to upload?");
++            check(w.tr.calls.equals(Arrays.asList(a.id + "->chatgpt")) && w.store.currentTransfer(a.id, "A", "claude") == null,
++                    "asking why a named historical upload failed stays text-only and does not create a Claude transfer");
++            w.c.submitUserMessage("Please retry doc.txt");
++            check(w.tr.calls.equals(Arrays.asList(a.id + "->chatgpt", a.id + "->claude")),
++                    "an explicit retry of the same filename still transfers the historical bytes");
++        });
++
+         test("restart: interrupted work is FAILED, never blindly resent, and explicit historical reference can retry", () -> {
+             W w = new W(true); w.tr.mode = MockArtifactTransport.Mode.MANUAL;
+             Artifact a = w.addFile("hello");
+--- a/tools/roomtest/upload_source_check.py
++++ b/tools/roomtest/upload_source_check.py
+@@ -29,5 +29,7 @@
+ ok('qUniqueIn(root, spec().fileInput' in JS and 'healthAmbiguous = !!amb.composer || !!amb.send' in JS, 'file-input ambiguity fails upload closed but cannot poison provider health')
+ ok('openFileUploadFallback' in JS and 'chooseFileUploadFallback' in JS and 'Add files, connectors, and more' in P and 'Add files or photos' in P and 'Add files and more' in P and 'Add photos & files' in P, 'ChatGPT and Claude both use exact visible provider upload menus')
+ ok('UPLOAD_MENU_RETRY_MS' in surface and 'chooseConfiguredUploadMenuItem' in surface and 'ensureUploadPoll' in surface, 'async provider menus get bounded exact-item retries with one upload poll')
++ok('spec.conversationIdOf(view == null ? null : view.getUrl())' in surface and 'filePathCallback.onReceiveValue(null)' in surface, 'provider chooser is consumed only for the exact bound conversation and cannot leak to the Android system picker during AGC upload')
++ok('upload-menu-item-not-found' in surface and 'startExactFileInput(a, expectedBefore, chosen)' in surface, 'bounded menu label drift falls back to the exact/scoped provider file input')
+ if bad: sys.exit(1)
+-print('Upload source check: %d checks, 0 failures' % 13)
++print('Upload source check: %d checks, 0 failures' % 15)
