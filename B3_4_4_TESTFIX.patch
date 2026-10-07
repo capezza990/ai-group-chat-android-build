@@ -1,0 +1,23 @@
+--- a/tools/roomtest/file_ui_source_check.py	2026-10-07 10:47:22.228590934 +0000
++++ b/tools/roomtest/file_ui_source_check.py	2026-10-07 10:47:22.744000690 +0000
+@@ -42,7 +42,9 @@
+     setter=ms.get('setArtifactService','')
+     need('controller.setArtifactService(service)' in setter, 'final lifecycle wiring must have one explicit UI injection point')
+     openp=ms.get('openProvider','')
+-    need('blockedByWork(' in openp and openp.find('blockedByWork(') < openp.find('surfaces.get(id)'), 'provider overlay must be blocked (run OR shared file service) before touching a provider surface')
++    need('blockedByWork(' not in openp and 'surfaces.get(id)' in openp, 'provider overlay viewing must remain available while a run or file operation is active')
++    bind=ms.get('useThisConversation','')
++    need('controller.isBusy()' in bind and bind.find('controller.isBusy()') < bind.find('surfaces.get(overlayProviderId)'), 'binding changes must stay blocked while the room is working even though provider viewing is allowed')
+     need('.transitionTransfer(' not in src and '.retryArtifact(' not in src, 'UI must not bypass ArtifactService/store transfer rules')
+     return bad
+ 
+@@ -60,7 +62,8 @@
+       ('capture retry offered without knowing the reply', real.replace('ArtifactUiRules.canRetryCapture(a, replyKnown)','ArtifactUiRules.canRetryCapture(a, true)',1)),
+       ('the reply identity is never looked up', real.replace('!db.sourceReplyRef(a.id).isEmpty()','true',1)),
+       ('service injection no longer reaches controller', real.replace('if (controller != null) controller.setArtifactService(service);','',1)),
+-      ('provider page opens during run', real.replace('if (blockedByWork("Wait for the current run to finish before opening a provider page.")) return;','',1)),
++      ('provider viewing is blocked again', real.replace('WebProviderSurface s = surfaces.get(id);','if (blockedByWork("Wait for the current run to finish before opening a provider page.")) return;\n        WebProviderSurface s = surfaces.get(id);',1)),
++      ('binding guard removed while room is busy', real.replace('if (controller.isBusy()) { toast("Binding changes are locked while the room is working. You can still inspect and scroll this page."); return; }','',1)),
+       ('destroy leaks unsent files', real.replace('for (String id : new ArrayList<>(pendingArtifactIds)) svc.discard(id);','',1)),
+     ]
+     for call in ('setText', 'setContentDescription', 'setBackground'):
