@@ -1,0 +1,22 @@
+diff --git a/tools/roomtest/RoomControllerTest.java b/tools/roomtest/RoomControllerTest.java
+index 6487b07..ceb878b 100644
+--- a/tools/roomtest/RoomControllerTest.java
++++ b/tools/roomtest/RoomControllerTest.java
+@@ -1425,7 +1425,7 @@ public final class RoomControllerTest {
+             live.addParticipant("chatgpt", false);
+             java.util.List<String> liveIds = new java.util.ArrayList<>();
+             for (ProviderInfo p : live.addableProviders(true)) liveIds.add(p.id);
+-            check(liveIds.equals(java.util.Arrays.asList("claude")), "a live room offers real AIs that are not seated (no developer mocks): " + liveIds);
++            check(liveIds.equals(java.util.Arrays.asList("claude", "gemini")), "a live room offers real AIs that are not seated (no developer mocks): " + liveIds);
+             java.util.List<String> devIds = new java.util.ArrayList<>();
+             for (ProviderInfo p : dev.addableProviders(false)) devIds.add(p.id);
+             check(devIds.equals(java.util.Arrays.asList("chatgpt", "claude", "gemini", "mock-delta")), "a developer room is offered everything in the registry: " + devIds);
+@@ -1515,7 +1515,7 @@ public final class RoomControllerTest {
+             check(store.participants("no-seats").isEmpty() && store.latestMessages("no-seats", 5).isEmpty(), "an existing room with no seat rows at all stays empty after reopening");
+             // the controller never seats anyone on its own either
+             RoomController empty = new RoomController(store, "no-seats", null);
+-            check(empty.participants().isEmpty() && empty.addableProviders(true).size() == 2, "building a controller for an empty room seats nobody (both AIs are offered under Add)");
++            check(empty.participants().isEmpty() && empty.addableProviders(true).size() == 3, "building a controller for an empty room seats nobody (all three live AIs are offered under Add)");
+         });
+ 
+         System.out.println("\n" + checks + " checks, " + failures + " failures");
