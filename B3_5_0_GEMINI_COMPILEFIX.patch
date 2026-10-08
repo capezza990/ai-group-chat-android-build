@@ -1,0 +1,12 @@
+diff --git a/app/src/main/java/com/aigroupchat/bridge/engine/ProviderSpec.java b/app/src/main/java/com/aigroupchat/bridge/engine/ProviderSpec.java
+index ae50732..6c541c9 100644
+--- a/app/src/main/java/com/aigroupchat/bridge/engine/ProviderSpec.java
++++ b/app/src/main/java/com/aigroupchat/bridge/engine/ProviderSpec.java
+@@ -106,6 +106,7 @@ public final class ProviderSpec {
+                     new String[]{"input[type='file']"},
+                     new String[]{"a[download]", "a[href*='googleusercontent.com']"},
+                     new String[]{"button[aria-label^='Download ']"}),
++                    new String[]{}),
+                     new String[]{"Upload files", "Add files", "Add files and more", "+"},
+                     new String[]{"Upload files", "Upload file", "Files", "Add files"}));
+ 
