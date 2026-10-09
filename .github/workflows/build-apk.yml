@@ -3,7 +3,8 @@ name: Build AI Group Chat APK
 on:
   workflow_dispatch:
   push:
-    branches: [ main ]
+    branches: [ main, build-a-v3.4.4-merged-staging ]
+    tags: [ build-a-v3.4.4-merged ]
 
 permissions:
   contents: read
@@ -103,6 +104,10 @@ jobs:
         working-directory: build-source/AI_GROUP_CHAT_ANDROID_M1_GITHUB
         run: cat ../../B3_5_2_BUILD_A.patch.gz.b64.0* | base64 -d | gzip -dc | patch -p1 --batch --forward
 
+      - name: Apply merged Build A final review correction
+        working-directory: build-source/AI_GROUP_CHAT_ANDROID_M1_GITHUB
+        run: cat ../../B3_5_2_BUILD_A_MERGED.patch.gz.b64.0* | base64 -d | gzip -dc | patch -p1 --batch --forward
+
       - name: Set up Java 17
         uses: actions/setup-java@v4
         with:
@@ -132,6 +137,7 @@ jobs:
           python3 tools/validate_project.py
           python3 tools/roomtest/b33_consolidated_source_check.py
           python3 tools/roomtest/b352_build_a_source_check.py
+          python3 tools/roomtest/b352_merged_source_check.py
           python3 tools/roomtest/upload_source_check.py
           python3 tools/roomtest/capture_source_check.py
           python3 tools/roomtest/capture_source_check.py --selftest
