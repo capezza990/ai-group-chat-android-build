@@ -3,7 +3,7 @@ name: Build AI Group Chat APK
 on:
   workflow_dispatch:
   push:
-    branches: [ main ]
+    branches: [ main, b352-build-a-merged ]
 
 permissions:
   contents: read
@@ -106,6 +106,10 @@ jobs:
       - name: Apply merged Build A overlay
         working-directory: build-source/AI_GROUP_CHAT_ANDROID_M1_GITHUB
         run: cat ../../B3_5_2_MERGED_BUILD_A_OVERLAY.patch.gz.b64.0* | base64 -d | gzip -dc | patch -p1 --batch --forward
+
+      - name: Apply Claude final Merged Build A correction
+        working-directory: build-source/AI_GROUP_CHAT_ANDROID_M1_GITHUB
+        run: cat ../../CLAUDE_FIX_ON_CHATGPT_CI_BUILD.diff.gz.b64.0* | base64 -d | gzip -dc | patch -p1 --batch --forward
 
       - name: Set up Java 17
         uses: actions/setup-java@v4
