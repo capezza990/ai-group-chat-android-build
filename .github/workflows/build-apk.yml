@@ -3,7 +3,7 @@ name: Build AI Group Chat APK
 on:
   workflow_dispatch:
   push:
-    branches: [ main, build-a-v3.4.4-merged-staging ]
+    branches: [ main ]
     tags: [ build-a-v3.4.4-merged ]
 
 permissions:
